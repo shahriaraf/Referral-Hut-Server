@@ -86,6 +86,58 @@ exports.getWithdrawals = async (req, res) => {
  * @desc    Handle a withdrawal request (accept or decline)
  * @access  Private (Admin)
  */
+
+
+
+exports.getLevelsByProgram = async (req, res) => {
+  const db = getDB();
+  try {
+    const programKey = req.params.programKey;
+    console.log('Route hit:', programKey);
+
+    // Debug: list collections
+    const collections = await db.listCollections().toArray();
+    console.log('Collections in DB:', collections.map(c => c.name));
+
+    const program = await db.collection("Levels").findOne({ key: programKey });
+    console.log('Found program:', program);
+
+    if (!program) return res.status(404).json({ message: "Program not found" });
+
+    res.json({ levels: program.levels || [] });
+  } catch (error) {
+    console.error("Error fetching levels:", error);
+    res.status(500).json({ message: "Server error", error });
+  }
+};
+
+
+// একক লেভেলের দাম আপডেট
+// adminController.js// adminController.js
+exports.updateLevelPrice = async (req, res) => {
+  const { programKey, levelNumber } = req.params;
+  const { price } = req.body;
+  const db = getDB();
+
+  try {
+    const result = await db.collection('Levels').updateOne(
+      { key: programKey, "levels.level": parseInt(levelNumber) },
+      { $set: { "levels.$.price": price, "levels.$.updatedAt": new Date() } }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({ msg: 'Level not found or price unchanged' });
+    }
+
+    res.json({ msg: 'Level price updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+};
+
+
+
 exports.handleWithdrawal = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body; // 'accepted' or 'declined'
