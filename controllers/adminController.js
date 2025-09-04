@@ -112,6 +112,31 @@ exports.getLevelsByProgram = async (req, res) => {
 };
 
 
+
+exports.getAllPrograms = async (req, res) => {
+  const db = getDB();
+  try {
+    // Levels collection থেকে সব প্রোগ্রাম fetch করা
+    const programs = await db.collection("Levels").find({}).toArray();
+
+    if (!programs || programs.length === 0) {
+      return res.status(404).json({ message: "No programs found" });
+    }
+
+    // সব প্রোগ্রামের ডেটা পাঠানো হচ্ছে
+    res.json({ programs });
+  } catch (error) {
+    console.error("Error fetching programs:", error);
+    res.status(500).json({ message: "Server error", error });
+  }
+};
+
+
+
+
+
+
+
 // একক লেভেলের দাম আপডেট
 // adminController.js// adminController.js
 exports.updateLevelPrice = async (req, res) => {
@@ -189,3 +214,6 @@ exports.handleWithdrawal = async (req, res) => {
         res.status(500).send('Server error'); 
     }
 };
+
+
+

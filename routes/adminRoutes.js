@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getDeposits, handleDeposit, getWithdrawals, handleWithdrawal, getLevelsByProgram, updateLevelPrice,  } = require('../controllers/adminController');
+const { getDeposits, handleDeposit, getWithdrawals, handleWithdrawal, getLevelsByProgram, updateLevelPrice, getAllCollections, getAllPrograms,  } = require('../controllers/adminController');
 const authMiddleware = require('../middleware/authMiddleware'); // Add admin check later if needed
 
 router.get('/deposits', authMiddleware, getDeposits);
@@ -12,5 +12,8 @@ router.get('/programs/:programKey/levels',  (req, res, next) => {
     next();
 }, getLevelsByProgram);
 router.patch('/programs/:programKey/levels/:levelNumber', updateLevelPrice);
+// routes/adminRoutes.js
+router.get('/programs', authMiddleware, getAllPrograms);
+
 
 module.exports = router;
