@@ -20,5 +20,12 @@ app.use('/api/user', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/programs', programRoutes);
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// --- REMOVE THIS SECTION ---
+// const PORT = process.env.PORT || 5000;
+// app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// --- END OF REMOVED SECTION ---
+
+
+// --- ADD THIS LINE AT THE END ---
+// Export the Express app for Vercel's serverless environment
+module.exports = app;
