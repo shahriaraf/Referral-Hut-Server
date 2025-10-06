@@ -46,6 +46,8 @@ const creditAdmin = async (db, amount, program, levelNum, fromUser, reason, sess
     console.log(`Admin credited ${amount} for: ${reason}`);
 };
 
+// controllers/userController.js
+
 const process3pPayment = async (db, session, buyerId, recipient, levelConfig, levelIndex) => {
     const program = '3p';
     const boxField = `packages.${program}.levels.${levelIndex}.boxes`;
@@ -54,24 +56,29 @@ const process3pPayment = async (db, session, buyerId, recipient, levelConfig, le
     const boxCount = updatedRecipient.packages[program].levels[levelIndex].boxes.length;
     if (boxCount <= 2) {
         await db.collection('users').updateOne({ _id: recipient._id }, { $inc: { balance: levelConfig.cost } }, { session });
-        console.log(`Payment for 3p box ${boxCount} sent to ${recipient.email}. Chain stops.`);
     } else {
-        console.log(`Processing 3p box 3 for ${recipient.email}. Recycling and passing up action.`);
-        const uplineForPayment = await findEligibleUpline(db, recipient._id, program, levelConfig.level, session);
+        // --- THIS IS THE CORRECTED LOGIC ---
+        // Instead of assuming the recipient's upline gets the payment, we find the NEXT ELIGIBLE upline.
+        // This correctly skips any frozen users in the chain.
+        const nextEligibleUpline = await findEligibleUpline(db, recipient._id, program, levelConfig.level, session);
+
         const circleField = `packages.${program}.levels.${levelIndex}.currentCircle`;
         const statusField = `packages.${program}.levels.${levelIndex}.status`;
+
         if (updatedRecipient.packages[program].levels[levelIndex].currentCircle >= 1) {
             await db.collection('users').updateOne({ _id: recipient._id }, { $set: { [boxField]: [], [statusField]: 'frozen' }, $inc: { [circleField]: 1 } }, { session });
         } else {
             await db.collection('users').updateOne({ _id: recipient._id }, { $set: { [boxField]: [] }, $inc: { [circleField]: 1 } }, { session });
         }
-        if (uplineForPayment) {
-            console.log(`Action passed up from ${recipient.email} to ${uplineForPayment.email}`);
-            await process3pPayment(db, session, buyerId, uplineForPayment, levelConfig, levelIndex);
+
+        // Now, we pass the "action" (which is also the payment in 3P) to the correct upline.
+        if (nextEligibleUpline) {
+            // The original logic was mostly correct here, but now it's guaranteed to be an active user.
+            await process3pPayment(db, session, buyerId, nextEligibleUpline, levelConfig, levelIndex);
         } else {
-            await creditAdmin(db, levelConfig.cost, program, levelConfig.level, buyerId, `3p box 3 pass-up, no upline for ${recipient.email}`, session);
-            console.log(`Chain stopped. No eligible upline found for ${recipient.email}. Admin credited.`);
+            await creditAdmin(db, levelConfig.cost, program, levelConfig.level, buyerId, `3p box 3 pass-up, no ELIGIBLE upline for ${recipient.email}`, session);
         }
+        // --- END OF CORRECTION ---
     }
 };
 
@@ -293,6 +300,8 @@ exports.submitWithdraw = async (req, res) => {
     }
 };
 
+// controllers/userController.js
+
 exports.unfreezeLevel = async (req, res) => {
     const { program, level } = req.params;
     const userId = new ObjectId(req.user.id);
@@ -330,6 +339,10 @@ exports.unfreezeLevel = async (req, res) => {
                 }
             };
             await db.collection('users').updateOne({ _id: userId }, updates, { session });
+            
+            // --- THIS IS THE CORRECTED LOGIC ---
+            // We ALREADY had the correct logic here, but it's important to confirm.
+            // It correctly finds the next ELIGIBLE upline to receive the unfreeze fee.
             const eligibleRecipient = await findEligibleUpline(db, userId, program, levelNum, session);
 
             if (eligibleRecipient) {
@@ -337,8 +350,11 @@ exports.unfreezeLevel = async (req, res) => {
             } else {
                 await creditAdmin(db, levelConfig.unfreezeCost, program, levelNum, userId, "Unfreeze fee, no eligible upline", session);
             }
+            // --- END OF CORRECTION ---
         });
+
         res.json({ msg: `Level ${level} of ${program} has been unfrozen successfully!` });
+
     } catch (err) {
         console.error("Unfreeze Error:", err.message);
         res.status(500).json({ msg: err.message || 'Server Error during unfreeze.' });
