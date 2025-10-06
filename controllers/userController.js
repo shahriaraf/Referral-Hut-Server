@@ -147,6 +147,8 @@ const process6pPayment = async (db, session, buyerId, recipient, levelConfig, le
     }
 };
 
+// controllers/userController.js
+
 exports.purchasePackageLevel = async (req, res) => {
     const { program, level } = req.params;
     if (!['3p', '6p'].includes(program)) {
@@ -201,12 +203,19 @@ exports.purchasePackageLevel = async (req, res) => {
 
             let effectiveReferrer;
             const directReferrerLevel = directReferrer.packages[program].levels[levelIndex];
-            if (directReferrerLevel.status !== 'locked') {
+            
+            // --- THIS IS THE FINAL, CORRECTED LOGIC BLOCK ---
+            // We check if the direct referrer's level is explicitly 'active'.
+            if (directReferrerLevel && directReferrerLevel.status === 'active') {
+                // If they are active, they are the initial recipient.
                 effectiveReferrer = directReferrer;
             } else {
-                effectiveReferrer = await findEligibleUpline(db, directReferrer._id, program, levelNum, session);
-                finalMessage += ` Your direct referrer did not own this level, commission passed up.`;
+                // If their status is 'locked' OR 'frozen', they are ineligible.
+                // We must now search up the chain for the next eligible person.
+                finalMessage += ` Your direct referrer's level was not active, commission is being passed up.`;
+                effectiveReferrer = await findEligibleUpline(db, buyer._id, program, levelNum, session);
             }
+            // --- END OF CORRECTION ---
 
             if (!effectiveReferrer) {
                 await creditAdmin(db, levelConfig.cost, program, levelNum, buyer._id, "No eligible upline found in chain", session);
@@ -214,7 +223,6 @@ exports.purchasePackageLevel = async (req, res) => {
                 return;
             }
             
-            // The main purchase function is now clean and delegates to the appropriate helper
             if (program === '3p') {
                 await process3pPayment(db, session, buyer._id, effectiveReferrer, levelConfig, levelIndex);
             } else if (program === '6p') {
