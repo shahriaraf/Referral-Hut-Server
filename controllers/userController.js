@@ -10,15 +10,28 @@ const findEligibleUpline = async (db, startingUserId, program, levelNum, session
     while (uplineId) {
         const upline = await db.collection('users').findOne({ _id: uplineId }, { session });
         if (!upline) {
-            return null;
+            return null; // Upline ID exists, but the user document was not found. Chain is broken.
         }
         const levelIndex = levelNum - 1;
-        if (upline.packages[program] && upline.packages[program].levels[levelIndex] && upline.packages[program].levels[levelIndex].status !== 'locked') {
-            return upline;
+
+        // --- THE CRITICAL FIX IS HERE ---
+        // We now check that the level status is 'active'.
+        // This correctly excludes both 'locked' and 'frozen' levels.
+        if (
+            upline.packages[program] &&
+            upline.packages[program].levels[levelIndex] &&
+            upline.packages[program].levels[levelIndex].status === 'active' // <-- THE FIX
+        ) {
+            // This upline is eligible. Return their user object.
+            return upline; 
         }
+        // --- END OF FIX ---
+
+        // If the upline was not eligible, move to their upline and continue the loop.
         uplineId = upline.referredBy ? new ObjectId(upline.referredBy) : null;
     }
-    return null;
+    // If the loop finishes, no eligible upline was found in the entire chain.
+    return null; 
 };
 
 const creditAdmin = async (db, amount, program, levelNum, fromUser, reason, session) => {
@@ -62,56 +75,60 @@ const process3pPayment = async (db, session, buyerId, recipient, levelConfig, le
     }
 };
 
+// controllers/userController.js
+
+// --- REPLACE THE EXISTING process6pPayment FUNCTION WITH THIS ---
+
 const process6pPayment = async (db, session, buyerId, recipient, levelConfig, levelIndex) => {
     const program = '6p';
     const boxField = `packages.${program}.levels.${levelIndex}.boxes`;
 
-    // Step 1: Add the buyer's ID to the current recipient's box
+    // This part is the same: the buyer always fills a box in the recipient's matrix.
     await db.collection('users').updateOne({ _id: recipient._id }, { $push: { [boxField]: buyerId } }, { session });
 
     const updatedRecipient = await db.collection('users').findOne({ _id: recipient._id }, { session });
     const boxCount = updatedRecipient.packages[program].levels[levelIndex].boxes.length;
     
-    // Step 2: Handle payment/action based on box number
     switch (boxCount) {
         case 1:
         case 6:
             // Pass-up ACTION slots. This will fill a box in the upline's matrix.
-            console.log(`Processing 6p box ${boxCount} for ${recipient.email}. Passing up action.`);
             const uplineForPayment = await findEligibleUpline(db, recipient._id, program, levelConfig.level, session);
             if (uplineForPayment) {
-                console.log(`Action passed up from ${recipient.email} to ${uplineForPayment.email}`);
-                // RECURSIVE CALL: The action now fills a box for the upline
                 await process6pPayment(db, session, buyerId, uplineForPayment, levelConfig, levelIndex);
             } else {
-                // If there's no upline, the money for this action goes to the admin.
                 await creditAdmin(db, levelConfig.cost, program, levelConfig.level, buyerId, `6p box ${boxCount}, no upline for ${recipient.email}`, session);
-                console.log(`Chain stopped. No eligible upline for ${recipient.email}. Admin credited.`);
             }
             break;
         
+        // --- THE CORRECTED LOGIC FOR BOX 2 ---
         case 2:
-            // Spillover/Gift to downline slot
-            const downlines = await db.collection('users').find({ referredBy: recipient._id }).toArray();
-            if (downlines.length > 0) {
-                const randomDownline = downlines[Math.floor(Math.random() * downlines.length)];
-                await db.collection('users').updateOne({ _id: randomDownline._id }, { $inc: { balance: levelConfig.cost } }, { session });
-            } else {
-                await db.collection('users').updateOne({ _id: recipient._id }, { $inc: { balance: levelConfig.cost } }, { session });
-            }
+            console.log(`Processing 6p box 2 for ${recipient.email}. Paying recipient and gifting action to buyer.`);
+            
+            // Action 1: The payment goes directly to the matrix owner (Bob).
+            await db.collection('users').updateOne({ _id: recipient._id }, { $inc: { balance: levelConfig.cost } }, { session });
+
+            // Action 2: The "gift" is to fill the buyer's (Carol's) own first box.
+            // We use the buyerId to identify who gets the gifted box.
+            await db.collection('users').updateOne(
+                { _id: buyerId },
+                { $push: { [boxField]: buyerId } }, // Add the buyer to their own box
+                { session }
+            );
+            
+            // No recursive call is made, so the chain reaction stops here. This is correct.
             break;
         
         case 3:
         case 4:
         case 5:
-            // Direct payment slots to the matrix owner
+            // Direct payment slots to the matrix owner. This is correct.
             await db.collection('users').updateOne({ _id: recipient._id }, { $inc: { balance: levelConfig.cost } }, { session });
             break;
     }
 
-    // Step 3: Check for recycle condition after payment is handled
+    // Recycle logic remains the same and is correct.
     if (boxCount >= 6) {
-        console.log(`Recycling 6p matrix for ${recipient.email}.`);
         const circleField = `packages.${program}.levels.${levelIndex}.currentCircle`;
         const statusField = `packages.${program}.levels.${levelIndex}.status`;
 
